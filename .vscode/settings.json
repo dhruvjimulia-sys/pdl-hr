@@ -1,6 +1,0 @@
-{
-    "solidity.remappingsUnix": [
-        "forge-std/=lib/forge-std/src/"
-    ],
-    "solidity.defaultCompiler": "localNodeModule",
-}

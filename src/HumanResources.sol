@@ -8,15 +8,18 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract HumanResources is IHumanResources {
 
     address immutable private hrManagerAddress;
-    // OPT: Colalease into one mapping
-    mapping(address => bool) private employeeRegistered;
+    mapping(address => bool) private employeeActive;
+    // CHECK Can only employees that were once registered withdraw?
+    mapping(address => bool) private isEmployee;
     mapping(address => uint256) private weeklySalary;
     mapping(address => uint256) private employedSince;
     mapping(address => uint256) private terminatedAt;
     mapping(address => uint256) private lastWithdrawn;
     mapping(address => bool) private isEth;
+    mapping(address => uint256) private accuredSalaryTillTermination;
     uint256 private activeEmployeeCount;
-
+    
+    address constant USDC_ADDRESS = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     IERC20 constant USDC = IERC20(USDC_ADDRESS);
 
     modifier onlyHRManager {
@@ -25,7 +28,12 @@ contract HumanResources is IHumanResources {
     }
 
     modifier onlyActiveEmployee {
-        require(employeeRegistered[msg.sender], NotAuthorized());
+        require(employeeActive[msg.sender], NotAuthorized());
+        _;
+    }
+
+    modifier onlyEmployee {
+        require(isEmployee[msg.sender], NotAuthorized());
         _;
     }
 
@@ -37,51 +45,51 @@ contract HumanResources is IHumanResources {
         address employee,
         uint256 weeklyUsdSalary
     ) external override onlyHRManager {
-        require(!employeeRegistered[employee], EmployeeAlreadyRegistered());
-        // TODO Reregister unclaimed salary edge case
-        employeeRegistered[employee] = true;
+        require(!employeeActive[employee], EmployeeAlreadyRegistered());
+        isEmployee[employee] = true;
+        employeeActive[employee] = true;
         weeklySalary[employee] = weeklyUsdSalary;
         employedSince[employee] = block.timestamp;
         isEth[employee] = false;
         lastWithdrawn[employee] = block.timestamp;
+        terminatedAt[employee] = 0;
         activeEmployeeCount++;
         emit EmployeeRegistered(employee, weeklyUsdSalary);
     }
 
     function terminateEmployee(address employee) external override onlyHRManager {
-        require(employeeRegistered[employee], EmployeeNotRegistered());
-        employeeRegistered[employee] = false;
-        // TODO stop accumulation
+        require(employeeActive[employee], EmployeeNotRegistered());
+        employeeActive[employee] = false;
+        accuredSalaryTillTermination[employee] = computeAccumulatedSalary(employee);
         terminatedAt[employee] = block.timestamp;
+        // CHECK employedSince semantics for terminated employees in getEmployeeInfo?
+        employedSince[employee] = 0;
         activeEmployeeCount--;
         emit EmployeeTerminated(employee);
     }
 
-    function withdrawSalary() external override {
-        address memory employee = msg.sender;
-        uint256 memory SECONDS_IN_WEEK = 7 * 24 * 3600;
-        uint256 memory USD_TO_USDC = 1e12;
-        uint256 memory amountInUSD = ((block.timestamp - lastWithdrawn[employee]) * weeklySalary[employee]) / (SECONDS_IN_WEEK);
-        uint256 memory amount = 0;
+    function withdrawSalary() public override onlyEmployee {
+        address employee = msg.sender;
+        uint256 amount = convertToCurrentCurrency(employee, computeAccumulatedSalary(employee) + accuredSalaryTillTermination[employee]);
+        lastWithdrawn[employee] = block.timestamp;
+        accuredSalaryTillTermination[employee] = 0;
         if (isEth[employee]) {
-
+            // TODO ETH transfer
         } else {
-            amount = amountInUSD / USD_TO_USDC;
-            // send USDC by using transfer
+            USDC.transfer(employee, amount);
         }
-        lastWithdrawn[msg.sender] = block.timestamp;
-        // TODO Accured salary should be zero
         emit SalaryWithdrawn(employee, isEth[employee], amount);
     }
 
     function switchCurrency() external override onlyActiveEmployee {
-        // TODO current pending salary withdrawn
-        isEth[msg.sender] = !isEth[msg.sender];
-        emit CurrencySwitched(msg.sender, isEth[msg.sender]);
+        address employee = msg.sender;
+        withdrawSalary();
+        isEth[employee] = !isEth[employee];
+        emit CurrencySwitched(employee, isEth[employee]);
     }
 
     function salaryAvailable(address employee) external view override returns (uint256) {
-        computeAccumulatedSalary();
+        return convertToCurrentCurrency(employee, computeAccumulatedSalary(employee));
     }
 
     function hrManager() external view override returns (address) {
@@ -92,14 +100,18 @@ contract HumanResources is IHumanResources {
         return activeEmployeeCount;
     }
 
-    function getEmployeeInfo(
-        address employee
-    ) external view override returns (uint256, uint256, uint256) {
-        // TODO employedSince semantics for terminated employees?
+    function getEmployeeInfo(address employee) external view override returns (uint256, uint256, uint256) {
         return (weeklySalary[employee], employedSince[employee], terminatedAt[employee]);
     }
 
-    // function computeAccumulatedSalary() {
+    function computeAccumulatedSalary(address employee) private view returns (uint256) {
+        uint256 SECONDS_IN_WEEK = 7 * 24 * 3600;
+        uint256 amountInUSD = ((block.timestamp - lastWithdrawn[employee]) * weeklySalary[employee]) / (SECONDS_IN_WEEK);
+        return amountInUSD;
+    }
 
-    // }
+    function convertToCurrentCurrency(address employee, uint256 amountInUSD) private view returns (uint256) {
+        uint256 USD_TO_USDC = 1e12;
+        return (isEth[employee]) ? 0 : amountInUSD / USD_TO_USDC;
+    }
 }
