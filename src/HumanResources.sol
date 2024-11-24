@@ -18,12 +18,10 @@ interface IWETH is IERC20 {
     function withdraw(uint256) external;
 }
 
-
 import {console} from "forge-std/Test.sol";
 
 contract HumanResources is IHumanResources {
-
-    address immutable private hrManagerAddress;
+    address private immutable hrManagerAddress;
     mapping(address => bool) private employeeActive;
     // CHECK Can only employees that were once registered withdraw?
     mapping(address => bool) private isEmployee;
@@ -34,37 +32,37 @@ contract HumanResources is IHumanResources {
     mapping(address => bool) private isEth;
     mapping(address => uint256) private accuredSalaryTillTermination;
     uint256 private activeEmployeeCount;
-    
-    address constant private USDC_ADDRESS = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
-    IERC20 constant private USDC = IERC20(USDC_ADDRESS);
 
-    address constant private CHAINLINK_ETH_USD_FEED = 0x13e3Ee699D1909E989722E753853AE30b17e08c5;
-    AggregatorV3Interface constant private ETH_USD_FEED = AggregatorV3Interface(CHAINLINK_ETH_USD_FEED);
+    address private constant USDC_ADDRESS = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    IERC20 private constant USDC = IERC20(USDC_ADDRESS);
 
-    address constant private UNISWAP_SWAP_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
-    ISwapRouter constant private SWAP_ROUTER = ISwapRouter(UNISWAP_SWAP_ROUTER);
+    address private constant CHAINLINK_ETH_USD_FEED = 0x13e3Ee699D1909E989722E753853AE30b17e08c5;
+    AggregatorV3Interface private constant ETH_USD_FEED = AggregatorV3Interface(CHAINLINK_ETH_USD_FEED);
 
-    address constant private WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
+    address private constant UNISWAP_SWAP_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
+    ISwapRouter private constant SWAP_ROUTER = ISwapRouter(UNISWAP_SWAP_ROUTER);
+
+    address private constant WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
 
     // TODO What are the possible values foe the fees?
-    uint24 constant private UNISWAP_FEE = 3000;
-    uint256 constant private UNISWAP_DEADLINE = 30;
-    uint256 constant private SLIPPAGE = 2;
+    uint24 private constant UNISWAP_FEE = 3000;
+    uint256 private constant UNISWAP_DEADLINE = 30;
+    uint256 private constant SLIPPAGE = 2;
 
     // TODO Remove for debugging
     event SwappedUSDCForWETH(uint256 amountInUSDC, uint256 amountOut);
 
-    modifier onlyHRManager {
+    modifier onlyHRManager() {
         require(msg.sender == hrManagerAddress, NotAuthorized());
         _;
     }
 
-    modifier onlyActiveEmployee {
+    modifier onlyActiveEmployee() {
         require(employeeActive[msg.sender], NotAuthorized());
         _;
     }
 
-    modifier onlyEmployee {
+    modifier onlyEmployee() {
         require(isEmployee[msg.sender], NotAuthorized());
         _;
     }
@@ -73,10 +71,7 @@ contract HumanResources is IHumanResources {
         hrManagerAddress = _hrManagerAddress;
     }
 
-    function registerEmployee(
-        address employee,
-        uint256 weeklyUsdSalary
-    ) external override onlyHRManager {
+    function registerEmployee(address employee, uint256 weeklyUsdSalary) external override onlyHRManager {
         require(!employeeActive[employee], EmployeeAlreadyRegistered());
         isEmployee[employee] = true;
         employeeActive[employee] = true;
@@ -148,7 +143,9 @@ contract HumanResources is IHumanResources {
 
     function computeAccumulatedSalary(address employee) private view returns (uint256) {
         uint256 SECONDS_IN_WEEK = 7 * 24 * 3600;
-        uint256 amountInUSD = (((block.timestamp - lastWithdrawn[employee]) * weeklySalary[employee]) / (SECONDS_IN_WEEK)) + accuredSalaryTillTermination[employee];
+        uint256 amountInUSD = (
+            ((block.timestamp - lastWithdrawn[employee]) * weeklySalary[employee]) / (SECONDS_IN_WEEK)
+        ) + accuredSalaryTillTermination[employee];
         return amountInUSD;
     }
 
@@ -158,7 +155,7 @@ contract HumanResources is IHumanResources {
     }
 
     function convertFromUSDToETH(uint256 amountInUSD) private view returns (uint256) {
-        (,int256 ethPrice,,,) = ETH_USD_FEED.latestRoundData();
+        (, int256 ethPrice,,,) = ETH_USD_FEED.latestRoundData();
         require(ethPrice > 0, "ETH price from oracle less than or equal to 0");
         uint256 ETH_TO_USD = 1e10;
         return (amountInUSD * 1e18) / (uint256(ethPrice) * ETH_TO_USD);
@@ -185,7 +182,7 @@ contract HumanResources is IHumanResources {
     }
 
     function transferETH(address recipient, uint256 amount) private {
-        (bool success, ) = recipient.call{value: amount}("");
+        (bool success,) = recipient.call{value: amount}("");
         require(success, "Failed to send ETH");
     }
 
