@@ -93,9 +93,11 @@ contract HumanResources is IHumanResources {
         accuredSalaryTillTermination[employee] = 0;
         uint256 amountSent;
         if (isEth[employee]) {
-            uint256 actualAmountInETH = swapUSDCForWETH(amountInUSDC, oracleAmountInETH * (100 - SLIPPAGE) / 100);
+            uint256 actualAmountInETH = swapUSDCForWETH(amountInUSDC, slippageMinimum(oracleAmountInETH, SLIPPAGE));
+            // CHECK Assuming actualAmountInETH is in wei
             WETH.withdraw(actualAmountInETH);
             amountSent = actualAmountInETH;
+            // CHECK Assuming transferETH is in wei
             transferETH(employee, actualAmountInETH);
         } else {
             USDC.transfer(employee, amountInUSDC);
@@ -112,6 +114,7 @@ contract HumanResources is IHumanResources {
     }
 
     function salaryAvailable(address employee) external view override returns (uint256) {
+        // CHECK For ETH, should this return in wei?
         uint256 amountInUSD = computeAccumulatedSalary(employee);
         return isEth[employee] ? convertFromUSDToETH(amountInUSD) : convertFromUSDToUSDC(amountInUSD);
     }
@@ -143,10 +146,12 @@ contract HumanResources is IHumanResources {
         (,int256 ethPrice,,,) = ETH_USD_FEED.latestRoundData();
         require(ethPrice > 0, "ETH price less than or equal to 0");
         uint256 ETH_TO_USD = 1e10;
-        return amountInUSD / (uint256(ethPrice) * ETH_TO_USD);
+        // Magic number 10e18 wei
+        return (amountInUSD * 10e18) / (uint256(ethPrice) * ETH_TO_USD);
     }
 
     function swapUSDCForWETH(uint256 amountInUSDC, uint256 amountOutMinimum) private returns (uint256) {
+        // CHECK Assuming amountOutMinimum is in wei
         uint256 amountOut = SWAP_ROUTER.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: USDC_ADDRESS,
@@ -165,5 +170,9 @@ contract HumanResources is IHumanResources {
     function transferETH(address recipient, uint256 amount) private {
         (bool success, ) = recipient.call{value: amount}("");
         require(success, "Failed to send ETH");
+    }
+
+    function slippageMinimum(uint256 amount, uint256 slippage) private pure returns (uint256) {
+        return amount * (100 - slippage) / 100;
     }
 }
