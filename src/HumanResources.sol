@@ -3,20 +3,11 @@ pragma solidity ^0.8.24;
 
 import "./IHumanResources.sol";
 
-// TODO Replace with library
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
-import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
+import "./interfaces/chainlink/AggregatorV3Interface.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-
-// TODO Is this the best way? Also understand payable
-interface IWETH is IERC20 {
-    /// @notice Deposit ether to get wrapped ether
-    function deposit() external payable;
-
-    /// @notice Withdraw wrapped ether to get ether
-    function withdraw(uint256) external;
-}
+import "./interfaces/weth/IWETH.sol";
 
 import {console} from "forge-std/Test.sol";
 
@@ -186,6 +177,7 @@ contract HumanResources is IHumanResources {
         require(success, "Failed to send ETH");
     }
 
+    // TODO Abstract this to a library
     function slippageMinimum(uint256 amount, uint256 slippage) private pure returns (uint256) {
         return amount * (100 - slippage) / 100;
     }

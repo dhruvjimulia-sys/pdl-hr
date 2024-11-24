@@ -6,8 +6,9 @@ import {HumanResources} from "../src/HumanResources.sol";
 import {IHumanResources} from "../src/IHumanResources.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import "../src/interfaces/chainlink/AggregatorV3Interface.sol";
+import "../src/interfaces/weth/IWETH.sol";
 
 // CHECK FOR EVENTS
 contract HumanResourcesTest is Test {
@@ -120,7 +121,7 @@ contract HumanResourcesTest is Test {
     }
 
     function testWithdrawSalary() public {
-        supplyUSDCToHR(1e18);
+        supplyUSDCToHR(WEEKLY_SALARY);
 
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
@@ -140,7 +141,7 @@ contract HumanResourcesTest is Test {
     }
 
     function testSwitchCurrencyAndWithdrawETH() public {
-        supplyUSDCToHR(1e18);
+        supplyUSDCToHR(WEEKLY_SALARY);
 
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
@@ -161,28 +162,28 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
     }
 
-    // function testSwitchCurrencyNotEmployee() public {
-    //     vm.startPrank(employee1);
-    //     vm.expectRevert(IHumanResources.NotAuthorized.selector);
-    //     hr.switchCurrency();
-    //     vm.stopPrank();
-    // }
+    function testSwitchCurrencyNotEmployee() public {
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.switchCurrency();
+        vm.stopPrank();
+    }
 
     // function testSwitchCurrencyTwice() public {
     //     // TODO Implement
     // }
 
-    // function testSwitchCurrencyTerminatedEmployee() public {
-    //     vm.startPrank(hrManager);
-    //     hr.registerEmployee(employee1, WEEKLY_SALARY);
-    //     hr.terminateEmployee(employee1);
-    //     vm.stopPrank();
+    function testSwitchCurrencyTerminatedEmployee() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
 
-    //     vm.startPrank(employee1);
-    //     vm.expectRevert(IHumanResources.NotAuthorized.selector);
-    //     hr.switchCurrency();
-    //     vm.stopPrank();
-    // }
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.switchCurrency();
+        vm.stopPrank();
+    }
 
     function testMultipleEmployees() public {
         vm.startPrank(hrManager);
@@ -199,26 +200,44 @@ contract HumanResourcesTest is Test {
         assertEq(salary2, WEEKLY_SALARY * 2);
     }
 
-    function swapETHForUSDC(uint256 amountInETH, address recipient) private {
+    function swapETHForUSDC(uint256 amountInUSDC, uint256 amountInETHMaximum, address recipient) private {
         // TODO Replace hardcoded amountOutMinimum with chainlink oracle
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+        ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
             tokenIn: WETH_ADDRESS,
             tokenOut: USDC_ADDRESS,
             fee: UNISWAP_FEE,
             recipient: recipient,
             deadline: block.timestamp + UNISWAP_DEADLINE,
-            amountIn: amountInETH,
-            amountOutMinimum: 3000e6,
+            amountInMaximum: amountInETHMaximum,
+            amountOut: amountInUSDC,
             sqrtPriceLimitX96: 0
         });
-        // TODO What happens if we dont send ETH?
-        SWAP_ROUTER.exactInputSingle{value: amountInETH}(params);
+        // TODO What happens if we dont send ETH? What if we instead use WETH?
+        SWAP_ROUTER.exactOutputSingle{value: amountInETHMaximum}(params);
     }
 
-    // TODO Change amountInETH to amountInUSDC
-    function supplyUSDCToHR(uint256 amountInETH) public {
-        // Convert USDC to ETH
-        vm.deal(address(this), amountInETH);
-        swapETHForUSDC(amountInETH, address(hr));
+    function supplyUSDCToHR(uint256 amountInUSD) private {
+        uint256 amountInETH = convertUSDToETH(amountInUSD);
+        uint256 slippageAmount = slippageMaximum(amountInETH, SLIPPAGE);
+        vm.deal(address(this), slippageAmount);
+        swapETHForUSDC(convertFromUSDToUSDC(amountInUSD), slippageAmount, address(hr));
+    }
+
+    function slippageMaximum(uint256 amount, uint256 slippage) private pure returns (uint256) {
+        return amount * (100 + slippage) / 100;
+    }
+
+    // TODO Abstract this to a library
+    function convertUSDToETH(uint256 amountInUSD) private view returns (uint256) {
+        (, int256 ethPrice,,,) = ETH_USD_FEED.latestRoundData();
+        require(ethPrice > 0, "ETH price from oracle less than or equal to 0");
+        uint256 ETH_TO_USD = 1e10;
+        return (amountInUSD * 1e18) / (uint256(ethPrice) * ETH_TO_USD);
+    }
+
+    // TODO Abstract this to a library
+    function convertFromUSDToUSDC(uint256 amountInUSD) private pure returns (uint256) {
+        uint256 USD_TO_USDC = 1e12;
+        return amountInUSD / USD_TO_USDC;
     }
 }
