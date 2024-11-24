@@ -5,12 +5,16 @@ import {Test, console} from "forge-std/Test.sol";
 import {HumanResources} from "../src/HumanResources.sol";
 import {IHumanResources} from "../src/IHumanResources.sol";
 
+import {CurrencyConvertUtils} from "../src/libraries/CurrencyConvertUtils.sol";
+import {SlippageComputationUtils} from "../src/libraries/SlippageComputationUtils.sol";
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "../src/interfaces/chainlink/AggregatorV3Interface.sol";
 import "../src/interfaces/weth/IWETH.sol";
 
-// CHECK FOR EVENTS
+// TODO CHECK FOR EVENTS
+// TODO CHECK SALARY ACCRUAL FOR LESS THAN WEEK, MORE THAN WEEK
 contract HumanResourcesTest is Test {
     HumanResources hr;
     address hrManager;
@@ -18,8 +22,6 @@ contract HumanResourcesTest is Test {
     address employee2;
 
     uint256 private constant WEEKLY_SALARY = 1000e18;
-    // TODO MAGIC NUMBER
-    uint256 private constant WEEKLY_SALARY_IN_USDC = WEEKLY_SALARY / 1e12;
     uint256 private constant SECONDS_IN_WEEK = 7 * 24 * 3600;
 
     address private constant USDC_ADDRESS = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
@@ -117,7 +119,7 @@ contract HumanResourcesTest is Test {
         // Fast forward 1 week
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
 
-        assertEq(hr.salaryAvailable(employee1), WEEKLY_SALARY_IN_USDC);
+        assertEq(hr.salaryAvailable(employee1), convertFromUSDToUSDC(WEEKLY_SALARY));
     }
 
     function testWithdrawSalary() public {
@@ -131,7 +133,7 @@ contract HumanResourcesTest is Test {
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
 
         uint256 amountInUsdc = hr.salaryAvailable(employee1);
-        assertEq(amountInUsdc, WEEKLY_SALARY_IN_USDC);
+        assertEq(amountInUsdc, convertFromUSDToUSDC(WEEKLY_SALARY));
 
         vm.startPrank(employee1);
         hr.withdrawSalary();
@@ -153,12 +155,13 @@ contract HumanResourcesTest is Test {
 
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
         uint256 amountInETH = hr.salaryAvailable(employee1);
-        // TODO Check whether the salary in ETH equal to expected value
-        assertGt(amountInETH, 0); // Ensure that the salary is now available in ETH
+        uint256 oracleAmountInETH = CurrencyConvertUtils.convertUSDToETH(WEEKLY_SALARY, ETH_USD_FEED);
+        assertEq(amountInETH, oracleAmountInETH);
 
         vm.startPrank(employee1);
         hr.withdrawSalary();
-        // TODO Check whether employee1 now has ETH
+        assertEq(hr.salaryAvailable(employee1), 0);
+        assertGe(employee1.balance, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
         vm.stopPrank();
     }
 
@@ -169,9 +172,43 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
     }
 
-    // function testSwitchCurrencyTwice() public {
-    //     // TODO Implement
-    // }
+    function testSwitchCurrencyTwiceAndWithdraw() public {
+        supplyUSDCToHR(WEEKLY_SALARY * 2);
+
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.startPrank(employee1);
+        hr.switchCurrency(); // Switch to ETH
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        uint256 amountInETH = hr.salaryAvailable(employee1);
+        uint256 oracleAmountInETH = CurrencyConvertUtils.convertUSDToETH(WEEKLY_SALARY, ETH_USD_FEED);
+        assertEq(amountInETH, oracleAmountInETH);
+
+        vm.startPrank(employee1);
+        hr.withdrawSalary(); // Withdraw ETH
+        assertEq(hr.salaryAvailable(employee1), 0);
+        assertGe(employee1.balance, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
+        vm.stopPrank();
+
+        // Switch back to USDC
+        vm.startPrank(employee1);
+        hr.switchCurrency();
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        uint256 amountInUsdc = hr.salaryAvailable(employee1);
+        assertEq(amountInUsdc, convertFromUSDToUSDC(WEEKLY_SALARY));
+
+        vm.startPrank(employee1);
+        hr.withdrawSalary(); // Withdraw USDC
+        assertEq(hr.salaryAvailable(employee1), 0);
+        assertEq(USDC.balanceOf(employee1), amountInUsdc);
+        vm.stopPrank();
+    }
 
     function testSwitchCurrencyTerminatedEmployee() public {
         vm.startPrank(hrManager);
@@ -201,7 +238,6 @@ contract HumanResourcesTest is Test {
     }
 
     function swapETHForUSDC(uint256 amountInUSDC, uint256 amountInETHMaximum, address recipient) private {
-        // TODO Replace hardcoded amountOutMinimum with chainlink oracle
         ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
             tokenIn: WETH_ADDRESS,
             tokenOut: USDC_ADDRESS,
@@ -217,22 +253,10 @@ contract HumanResourcesTest is Test {
     }
 
     function supplyUSDCToHR(uint256 amountInUSD) private {
-        uint256 amountInETH = convertUSDToETH(amountInUSD);
-        uint256 slippageAmount = slippageMaximum(amountInETH, SLIPPAGE);
+        uint256 amountInETH = CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED);
+        uint256 slippageAmount = SlippageComputationUtils.slippageMaximum(amountInETH, SLIPPAGE);
         vm.deal(address(this), slippageAmount);
         swapETHForUSDC(convertFromUSDToUSDC(amountInUSD), slippageAmount, address(hr));
-    }
-
-    function slippageMaximum(uint256 amount, uint256 slippage) private pure returns (uint256) {
-        return amount * (100 + slippage) / 100;
-    }
-
-    // TODO Abstract this to a library
-    function convertUSDToETH(uint256 amountInUSD) private view returns (uint256) {
-        (, int256 ethPrice,,,) = ETH_USD_FEED.latestRoundData();
-        require(ethPrice > 0, "ETH price from oracle less than or equal to 0");
-        uint256 ETH_TO_USD = 1e10;
-        return (amountInUSD * 1e18) / (uint256(ethPrice) * ETH_TO_USD);
     }
 
     // TODO Abstract this to a library

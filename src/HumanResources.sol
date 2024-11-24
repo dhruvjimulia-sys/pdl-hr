@@ -8,8 +8,8 @@ import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import "./interfaces/chainlink/AggregatorV3Interface.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "./interfaces/weth/IWETH.sol";
-
-import {console} from "forge-std/Test.sol";
+import {CurrencyConvertUtils} from "./libraries/CurrencyConvertUtils.sol";
+import {SlippageComputationUtils} from "./libraries/SlippageComputationUtils.sol";
 
 contract HumanResources is IHumanResources {
     address private immutable hrManagerAddress;
@@ -39,9 +39,6 @@ contract HumanResources is IHumanResources {
     uint24 private constant UNISWAP_FEE = 3000;
     uint256 private constant UNISWAP_DEADLINE = 30;
     uint256 private constant SLIPPAGE = 2;
-
-    // TODO Remove for debugging
-    event SwappedUSDCForWETH(uint256 amountInUSDC, uint256 amountOut);
 
     modifier onlyHRManager() {
         require(msg.sender == hrManagerAddress, NotAuthorized());
@@ -89,15 +86,17 @@ contract HumanResources is IHumanResources {
     function withdrawSalary() public override onlyEmployee {
         address employee = msg.sender;
         uint256 amountInUSD = computeAccumulatedSalary(employee);
+        if (amountInUSD == 0) {
+            emit SalaryWithdrawn(employee, isEth[employee], 0);
+            return;
+        }
         uint256 amountInUSDC = convertFromUSDToUSDC(amountInUSD);
-        uint256 oracleAmountInETH = convertFromUSDToETH(amountInUSD);
+        uint256 oracleAmountInETH = CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED);
         lastWithdrawn[employee] = block.timestamp;
         accuredSalaryTillTermination[employee] = 0;
         uint256 amountSent;
         if (isEth[employee]) {
-            console.log("Oracle amount in ETH", oracleAmountInETH);
-            uint256 actualAmountInETH = swapUSDCForWETH(amountInUSDC, slippageMinimum(oracleAmountInETH, SLIPPAGE));
-            console.log(IWETH(WETH_ADDRESS).balanceOf(address(this)));
+            uint256 actualAmountInETH = swapUSDCForWETH(amountInUSDC, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
             IWETH(WETH_ADDRESS).withdraw(actualAmountInETH);
             amountSent = actualAmountInETH;
             transferETH(employee, actualAmountInETH);
@@ -117,7 +116,7 @@ contract HumanResources is IHumanResources {
 
     function salaryAvailable(address employee) external view override returns (uint256) {
         uint256 amountInUSD = computeAccumulatedSalary(employee);
-        return isEth[employee] ? convertFromUSDToETH(amountInUSD) : convertFromUSDToUSDC(amountInUSD);
+        return isEth[employee] ? CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED) : convertFromUSDToUSDC(amountInUSD);
     }
 
     function hrManager() external view override returns (address) {
@@ -145,16 +144,7 @@ contract HumanResources is IHumanResources {
         return amountInUSD / USD_TO_USDC;
     }
 
-    function convertFromUSDToETH(uint256 amountInUSD) private view returns (uint256) {
-        (, int256 ethPrice,,,) = ETH_USD_FEED.latestRoundData();
-        require(ethPrice > 0, "ETH price from oracle less than or equal to 0");
-        uint256 ETH_TO_USD = 1e10;
-        return (amountInUSD * 1e18) / (uint256(ethPrice) * ETH_TO_USD);
-    }
-
     function swapUSDCForWETH(uint256 amountInUSDC, uint256 amountOutMinimum) private returns (uint256) {
-        console.log("amountInUSDC", amountInUSDC);
-        console.log("amountOutMinimum", amountOutMinimum);
         TransferHelper.safeApprove(USDC_ADDRESS, address(SWAP_ROUTER), amountInUSDC);
         uint256 amountOut = SWAP_ROUTER.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
@@ -168,18 +158,12 @@ contract HumanResources is IHumanResources {
                 sqrtPriceLimitX96: 0
             })
         );
-        console.log("amountOut", amountOut);
         return amountOut;
     }
 
     function transferETH(address recipient, uint256 amount) private {
         (bool success,) = recipient.call{value: amount}("");
         require(success, "Failed to send ETH");
-    }
-
-    // TODO Abstract this to a library
-    function slippageMinimum(uint256 amount, uint256 slippage) private pure returns (uint256) {
-        return amount * (100 - slippage) / 100;
     }
 
     // TODO Understand this
