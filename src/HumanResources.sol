@@ -7,7 +7,17 @@ import "./IHumanResources.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
-import '../lib/uniswap/interfaces/ISwapRouter.sol';
+import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+
+// TODO Is this the best way? Also understand payable
+interface IWETH is IERC20 {
+    /// @notice Deposit ether to get wrapped ether
+    function deposit() external payable;
+
+    /// @notice Withdraw wrapped ether to get ether
+    function withdraw(uint256) external;
+}
+
 
 import {console} from "forge-std/Test.sol";
 
@@ -99,7 +109,10 @@ contract HumanResources is IHumanResources {
         accuredSalaryTillTermination[employee] = 0;
         uint256 amountSent;
         if (isEth[employee]) {
+            console.log("Oracle amount in ETH", oracleAmountInETH);
             uint256 actualAmountInETH = swapUSDCForWETH(amountInUSDC, slippageMinimum(oracleAmountInETH, SLIPPAGE));
+            console.log(IWETH(WETH_ADDRESS).balanceOf(address(this)));
+            IWETH(WETH_ADDRESS).withdraw(actualAmountInETH);
             amountSent = actualAmountInETH;
             transferETH(employee, actualAmountInETH);
         } else {
@@ -154,7 +167,7 @@ contract HumanResources is IHumanResources {
     function swapUSDCForWETH(uint256 amountInUSDC, uint256 amountOutMinimum) private returns (uint256) {
         console.log("amountInUSDC", amountInUSDC);
         console.log("amountOutMinimum", amountOutMinimum);
-        // TransferHelper.safeApprove(USDC_ADDRESS, address(SWAP_ROUTER), amountInUSDC);
+        TransferHelper.safeApprove(USDC_ADDRESS, address(SWAP_ROUTER), amountInUSDC);
         uint256 amountOut = SWAP_ROUTER.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: USDC_ADDRESS,
@@ -168,7 +181,6 @@ contract HumanResources is IHumanResources {
             })
         );
         console.log("amountOut", amountOut);
-        emit SwappedUSDCForWETH(amountInUSDC, amountOut);
         return amountOut;
     }
 
@@ -180,4 +192,8 @@ contract HumanResources is IHumanResources {
     function slippageMinimum(uint256 amount, uint256 slippage) private pure returns (uint256) {
         return amount * (100 - slippage) / 100;
     }
+
+    // TODO Understand this
+    // Allow the contract to receive ETH
+    receive() external payable {}
 }

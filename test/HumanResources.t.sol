@@ -7,8 +7,10 @@ import {IHumanResources} from "../src/IHumanResources.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
-import '../lib/uniswap/interfaces/ISwapRouter.sol';
+import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 
+
+// CHECK FOR EVENTS
 contract HumanResourcesTest is Test {
     HumanResources hr;
     address hrManager;
