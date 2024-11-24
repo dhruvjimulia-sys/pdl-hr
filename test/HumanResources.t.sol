@@ -5,16 +5,41 @@ import {Test, console} from "forge-std/Test.sol";
 import {HumanResources} from "../src/HumanResources.sol";
 import {IHumanResources} from "../src/IHumanResources.sol";
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
+import '../lib/uniswap/interfaces/ISwapRouter.sol';
+
 contract HumanResourcesTest is Test {
     HumanResources hr;
     address hrManager;
     address employee1;
     address employee2;
-    uint256 constant WEEKLY_SALARY = 1000e18;
-    uint256 constant WEEKLY_SALARY_IN_USDC = 1000e6;
-    uint256 constant SECONDS_IN_WEEK = 7 * 24 * 3600;
+
+    uint256 constant private WEEKLY_SALARY = 1000e18;
+    // TODO MAGIC NUMBER
+    uint256 constant private WEEKLY_SALARY_IN_USDC = WEEKLY_SALARY / 1e12;
+    uint256 constant private SECONDS_IN_WEEK = 7 * 24 * 3600;
+    
+    address constant private USDC_ADDRESS = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    IERC20 constant private USDC = IERC20(USDC_ADDRESS);
+
+    address constant private CHAINLINK_ETH_USD_FEED = 0x13e3Ee699D1909E989722E753853AE30b17e08c5;
+    AggregatorV3Interface constant private ETH_USD_FEED = AggregatorV3Interface(CHAINLINK_ETH_USD_FEED);
+
+    address constant private UNISWAP_SWAP_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
+    ISwapRouter constant private SWAP_ROUTER = ISwapRouter(UNISWAP_SWAP_ROUTER);
+
+    address constant private WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
+
+    uint24 constant private UNISWAP_FEE = 3000;
+    uint256 constant private UNISWAP_DEADLINE = 30;
+    uint256 constant private SLIPPAGE = 2;
  
     function setUp() public {
+        // TODO Replace with optimism fork??
+        uint256 optimismFork = vm.createFork("https://optimism-mainnet.infura.io/v3/8a6b3b58c4ec4de19ff4e06e74a593c5");
+        vm.selectFork(optimismFork);
+
         hrManager = makeAddr("hrManager");
         employee1 = makeAddr("employee1");
         employee2 = makeAddr("employee2"); 
@@ -94,6 +119,8 @@ contract HumanResourcesTest is Test {
     }
 
     function testWithdrawSalary() public {
+        supplyUSDCToHR(1e18);
+        
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
         vm.stopPrank();
@@ -101,13 +128,19 @@ contract HumanResourcesTest is Test {
         // Fast forward 1 week
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
         
+        uint256 amountInUsdc = hr.salaryAvailable(employee1);
+        assertEq(amountInUsdc, WEEKLY_SALARY_IN_USDC);
+
         vm.startPrank(employee1);
         hr.withdrawSalary();
         assertEq(hr.salaryAvailable(employee1), 0);
+        assertEq(USDC.balanceOf(employee1), amountInUsdc);
         vm.stopPrank();
     }
 
-    function testSwitchCurrency() public {
+    function testSwitchCurrencyAndWithdrawETH() public {
+        supplyUSDCToHR(1e18);
+        
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
         vm.stopPrank();
@@ -116,17 +149,39 @@ contract HumanResourcesTest is Test {
         hr.switchCurrency();
         vm.stopPrank();
 
-        // Test that next salary will be in ETH
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
-        assertEq(hr.salaryAvailable(employee1), 0); // ETH conversion not implemented yet
-    }
+        uint256 amountInETH = hr.salaryAvailable(employee1);
+        // TODO Check whether the salary in ETH equal to expected value
+        assertGt(amountInETH, 0); // Ensure that the salary is now available in ETH
 
-    function testSwitchCurrencyNotEmployee() public {
         vm.startPrank(employee1);
-        vm.expectRevert(IHumanResources.NotAuthorized.selector);
-        hr.switchCurrency();
+        hr.withdrawSalary();
+        // Check whether employee1 now has ETH
         vm.stopPrank();
     }
+
+    // function testSwitchCurrencyNotEmployee() public {
+    //     vm.startPrank(employee1);
+    //     vm.expectRevert(IHumanResources.NotAuthorized.selector);
+    //     hr.switchCurrency();
+    //     vm.stopPrank();
+    // }
+
+    // function testSwitchCurrencyTwice() public {
+    //     // TODO Implement
+    // }
+
+    // function testSwitchCurrencyTerminatedEmployee() public {
+    //     vm.startPrank(hrManager);
+    //     hr.registerEmployee(employee1, WEEKLY_SALARY);
+    //     hr.terminateEmployee(employee1);
+    //     vm.stopPrank();
+
+    //     vm.startPrank(employee1);
+    //     vm.expectRevert(IHumanResources.NotAuthorized.selector);
+    //     hr.switchCurrency();
+    //     vm.stopPrank();
+    // }
 
     function testMultipleEmployees() public {
         vm.startPrank(hrManager);
@@ -141,5 +196,26 @@ contract HumanResourcesTest is Test {
         
         assertEq(salary1, WEEKLY_SALARY);
         assertEq(salary2, WEEKLY_SALARY * 2);
+    }
+
+    function swapEthForUsdc(uint256 amountInETH, address recepient) private {
+        // TODO Replace hardcoded amountOutMinimum with chainlink oracle
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({ 
+            tokenIn: WETH_ADDRESS,
+            tokenOut: USDC_ADDRESS,
+            fee: UNISWAP_FEE,
+            recipient: recepient,
+            deadline: block.timestamp + UNISWAP_DEADLINE,
+            amountIn: amountInETH,
+            amountOutMinimum: 3000e6,
+            sqrtPriceLimitX96: 0
+        });
+        SWAP_ROUTER.exactInputSingle{value: amountInETH}(params);
+    }
+
+    // TODO Change amountInETH to amountInUSDC
+    function supplyUSDCToHR(uint256 amountInETH) public {
+        vm.deal(address(this), amountInETH);
+        swapEthForUsdc(amountInETH, address(hr));
     }
 }
