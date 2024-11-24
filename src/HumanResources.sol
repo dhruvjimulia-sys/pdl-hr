@@ -5,6 +5,7 @@ import "./IHumanResources.sol";
 
 // TODO Replace with library
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
 import '../lib/uniswap/interfaces/ISwapRouter.sol';
 
