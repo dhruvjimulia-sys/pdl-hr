@@ -5,7 +5,6 @@ import "./IHumanResources.sol";
 
 // TODO Replace with library
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@v3-periphery/contracts/libraries/TransferHelper.sol";
 import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
 import '../lib/uniswap/interfaces/ISwapRouter.sol';
 
@@ -154,7 +153,7 @@ contract HumanResources is IHumanResources {
     function swapUSDCForWETH(uint256 amountInUSDC, uint256 amountOutMinimum) private returns (uint256) {
         console.log("amountInUSDC", amountInUSDC);
         console.log("amountOutMinimum", amountOutMinimum);
-        TransferHelper.safeApprove(USDC_ADDRESS, address(SWAP_ROUTER), amountInUSDC);
+        // TransferHelper.safeApprove(USDC_ADDRESS, address(SWAP_ROUTER), amountInUSDC);
         uint256 amountOut = SWAP_ROUTER.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: USDC_ADDRESS,
