@@ -4,6 +4,9 @@ pragma solidity ^0.8.24;
 import "./IHumanResources.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "../lib/chainlink/interfaces/AggregatorV3Interface.sol";
+import "uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+
 
 contract HumanResources is IHumanResources {
 
@@ -21,6 +24,12 @@ contract HumanResources is IHumanResources {
     
     address constant USDC_ADDRESS = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     IERC20 constant USDC = IERC20(USDC_ADDRESS);
+
+    address constant CHAINLINK_ETH_USD_FEED = 0x13e3Ee699D1909E989722E753853AE30b17e08c5;
+    AggregatorV3Interface constant ETH_USD_FEED = AggregatorV3Interface(CHAINLINK_ETH_USD_FEED);
+
+    address constant UNISWAP_SWAP_ROUTER = 0xE592427A0AEce92De3EbC44e995AE9D83D0A0C62;
+    ISwapRouter constant SWAP_ROUTER = ISwapRouter(UNISWAP_SWAP_ROUTER);
 
     modifier onlyHRManager {
         require(msg.sender == hrManagerAddress, NotAuthorized());
