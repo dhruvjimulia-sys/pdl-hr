@@ -73,8 +73,8 @@ contract HumanResources is IHumanResources {
 
     function terminateEmployee(address employee) external override onlyHRManager {
         require(employeeActive[employee], EmployeeNotRegistered());
-        employeeActive[employee] = false;
         accuredSalaryTillTermination[employee] = computeAccumulatedSalary(employee);
+        employeeActive[employee] = false;
         terminatedAt[employee] = block.timestamp;
         activeEmployeeCount--;
         emit EmployeeTerminated(employee);
@@ -133,9 +133,10 @@ contract HumanResources is IHumanResources {
 
     function computeAccumulatedSalary(address employee) private view returns (uint256) {
         uint256 SECONDS_IN_WEEK = 7 * 24 * 3600;
-        uint256 amountInUSD = (
-            ((block.timestamp - lastWithdrawn[employee]) * weeklySalary[employee]) / (SECONDS_IN_WEEK)
-        ) + accuredSalaryTillTermination[employee];
+        uint256 amountInUSD = accuredSalaryTillTermination[employee];
+        if (!(isEmployee[employee] && !employeeActive[employee])) {
+            amountInUSD += ((block.timestamp - lastWithdrawn[employee]) * weeklySalary[employee]) / (SECONDS_IN_WEEK);
+        }
         return amountInUSD;
     }
 
@@ -161,6 +162,5 @@ contract HumanResources is IHumanResources {
         require(success, "Failed to send ETH");
     }
 
-    // Allow the contract to receive ETH
     receive() external payable {}
 }

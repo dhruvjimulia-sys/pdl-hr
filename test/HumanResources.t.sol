@@ -15,19 +15,20 @@ import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "../src/interfaces/chainlink/AggregatorV3Interface.sol";
 import "../src/interfaces/weth/IWETH.sol";
 
-// TODO CHECK SALARY ACCRUAL FOR ONE SECOND, MORE THAN WEEK
-// TODO OTHER TESTS AND EDGE CASES
 // TODO WITHDRAW EMPTY SALARY
 // WAIT AFTER REGISTERING TO TEST FOR GETEMPLOYEEINFO
-// TEST FOR REREGISTRATION EDGE CASE
+// TODO when an employee is re-registered, there is a chance of the employee still having an unclaimed salary. In this case, you should account for the unclaimed salary.
 contract HumanResourcesTest is Test {
     HumanResources hr;
     address hrManager;
     address employee1;
     address employee2;
 
-    uint256 private constant WEEKLY_SALARY = 1000e18;
     uint256 private constant SECONDS_IN_WEEK = 7 * 24 * 3600;
+    uint256 private constant SECONDS_IN_DAY = 24 * 3600;
+
+    uint256 private constant WEEKLY_SALARY = 1000e18;
+    uint256 private constant ANOTHER_WEEKLY_SALARY = 3456e18;
 
     address private constant USDC_ADDRESS = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     IERC20 private constant USDC = IERC20(USDC_ADDRESS);
@@ -61,25 +62,15 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
     }
 
-    function testHRManager() public view {
-        assertEq(hr.hrManager(), hrManager);
-    }
-
     function testRegisterEmployee() public {
         vm.startPrank(hrManager);
         vm.expectEmit(true, true, true, true);
         emit IHumanResources.EmployeeRegistered(employee1, WEEKLY_SALARY);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
         vm.stopPrank();
-
-        assertEq(hr.getActiveEmployeeCount(), 1);
-        (uint256 salary, uint256 since, uint256 terminated) = hr.getEmployeeInfo(employee1);
-        assertEq(salary, WEEKLY_SALARY);
-        assertEq(since, block.timestamp);
-        assertEq(terminated, 0);
     }
 
-    function testUnregisteredNonTerminatedEmployeeCannotRegisterEmployees() public {
+    function testUnregisteredEmployeeCannotRegisterEmployees() public {
         vm.startPrank(employee1);
         vm.expectRevert(IHumanResources.NotAuthorized.selector);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
@@ -124,10 +115,6 @@ contract HumanResourcesTest is Test {
         emit IHumanResources.EmployeeTerminated(employee1);
         hr.terminateEmployee(employee1);
         vm.stopPrank();
-
-        assertEq(hr.getActiveEmployeeCount(), 0);
-        (,, uint256 terminated) = hr.getEmployeeInfo(employee1);
-        assertEq(terminated, block.timestamp);
     }
 
     function testUnregisteredNonTerminatedEmployeeCannotTerminateEmployees() public {
@@ -166,14 +153,14 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
     }
 
-    function testTerminateUnregisteredNonTerminatedEmployee() public {
+    function testTerminateUnregisteredEmployee() public {
         vm.startPrank(hrManager);
         vm.expectRevert(IHumanResources.EmployeeNotRegistered.selector);
         hr.terminateEmployee(employee1);
         vm.stopPrank();
     }
 
-    function testTerminateTerminatedEmployee() public {
+    function testTerminateAlreadyTerminatedEmployee() public {
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
         hr.terminateEmployee(employee1);
@@ -182,15 +169,96 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
     }
 
-    function testSalaryAccumulation() public {
+    function testSalaryAccumulationOneSecondAtATime() public {
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
         vm.stopPrank();
 
-        // Fast forward 1 week
+        vm.warp(block.timestamp + 1);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY / SECONDS_IN_WEEK));
+        vm.warp(block.timestamp + 1);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC((WEEKLY_SALARY * 2) / SECONDS_IN_WEEK));
+        vm.warp(block.timestamp + 1);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC((WEEKLY_SALARY * 3) / SECONDS_IN_WEEK));
+    }
+
+    function testSalaryAccumulationOneDayAtATime() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_DAY);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY / 7));
+        vm.warp(block.timestamp + SECONDS_IN_DAY);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC((2 * WEEKLY_SALARY) / 7));
+        vm.warp(block.timestamp + SECONDS_IN_DAY);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC((3 * WEEKLY_SALARY) / 7));
+    }
+
+    function testSalaryAccumulationOneWeekAtATime() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
-
         assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY * 2));
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY * 3));
+    }
+
+    function testSalaryAccumulationWithAnotherWeeklySalary() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, ANOTHER_WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(ANOTHER_WEEKLY_SALARY));
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(ANOTHER_WEEKLY_SALARY * 2));
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(ANOTHER_WEEKLY_SALARY * 3));
+    }
+
+    function testSalaryAccumulationStopsWhenEmployeeIsTerminated() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+
+        vm.startPrank(hrManager);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+    }
+
+    function testSalaryAccumulationTerminatedThenReRegistered() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+
+        hr.terminateEmployee(employee1);
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY * 2));
+
+        hr.terminateEmployee(employee1);
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY * 2));
+
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY * 3));
+        vm.stopPrank();
     }
 
     function testWithdrawSalary() public {
@@ -307,19 +375,37 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
     }
 
-    function testMultipleEmployees() public {
+    // TODO test in preferred currency
+    function testSalaryAvailable() public {
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
-        hr.registerEmployee(employee2, WEEKLY_SALARY * 2);
         vm.stopPrank();
 
+        assertEq(hr.salaryAvailable(employee1), 0);
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+    }
+
+    function testHRManager() public view {
+        assertEq(hr.hrManager(), hrManager);
+    }
+
+    function testGetActiveEmployeeCount() public {
+        vm.startPrank(hrManager);
+        assertEq(hr.getActiveEmployeeCount(), 0);
+
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        assertEq(hr.getActiveEmployeeCount(), 1);
+
+        hr.registerEmployee(employee2, WEEKLY_SALARY);
         assertEq(hr.getActiveEmployeeCount(), 2);
 
-        (uint256 salary1,,) = hr.getEmployeeInfo(employee1);
-        (uint256 salary2,,) = hr.getEmployeeInfo(employee2);
+        hr.terminateEmployee(employee1);
+        assertEq(hr.getActiveEmployeeCount(), 1);
 
-        assertEq(salary1, WEEKLY_SALARY);
-        assertEq(salary2, WEEKLY_SALARY * 2);
+        hr.terminateEmployee(employee2);
+        assertEq(hr.getActiveEmployeeCount(), 0);
+        vm.stopPrank();
     }
 
     function swapETHForUSDC(uint256 amountInUSDC, uint256 amountInETHMaximum, address recipient) private {
@@ -336,6 +422,8 @@ contract HumanResourcesTest is Test {
         });
         IWETH(WETH_ADDRESS).deposit{value: amountInETHMaximum}();
         SWAP_ROUTER.exactOutputSingle(params);
+
+        // TODO exactOutputSingle thing to do
     }
 
     function supplyUSDCToHR(uint256 amountInUSD) private {
