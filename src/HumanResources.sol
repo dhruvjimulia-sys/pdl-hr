@@ -14,7 +14,6 @@ import {SlippageComputationUtils} from "./libraries/SlippageComputationUtils.sol
 contract HumanResources is IHumanResources {
     address private immutable hrManagerAddress;
     mapping(address => bool) private employeeActive;
-    // CHECK Can only employees that were once registered withdraw?
     mapping(address => bool) private isEmployee;
     mapping(address => uint256) private weeklySalary;
     mapping(address => uint256) private employedSince;
