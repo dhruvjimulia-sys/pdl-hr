@@ -17,6 +17,7 @@ import "../src/interfaces/weth/IWETH.sol";
 
 // TODO CHECK SALARY ACCRUAL FOR ONE SECOND, MORE THAN WEEK
 // TODO OTHER TESTS AND EDGE CASES
+// TEST FOR REREGISTRATION EDGE CASE
 contract HumanResourcesTest is Test {
     HumanResources hr;
     address hrManager;

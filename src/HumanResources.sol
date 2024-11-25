@@ -95,7 +95,8 @@ contract HumanResources is IHumanResources {
         accuredSalaryTillTermination[employee] = 0;
         uint256 amountSent;
         if (isEth[employee]) {
-            uint256 actualAmountInETH = swapUSDCForWETH(amountInUSDC, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
+            uint256 actualAmountInETH =
+                swapUSDCForWETH(amountInUSDC, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
             IWETH(WETH_ADDRESS).withdraw(actualAmountInETH);
             amountSent = actualAmountInETH;
             transferETH(employee, actualAmountInETH);
@@ -115,7 +116,9 @@ contract HumanResources is IHumanResources {
 
     function salaryAvailable(address employee) external view override returns (uint256) {
         uint256 amountInUSD = computeAccumulatedSalary(employee);
-        return isEth[employee] ? CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED) : CurrencyConvertUtils.convertFromUSDToUSDC(amountInUSD);
+        return isEth[employee]
+            ? CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED)
+            : CurrencyConvertUtils.convertFromUSDToUSDC(amountInUSD);
     }
 
     function hrManager() external view override returns (address) {
