@@ -35,8 +35,7 @@ contract HumanResources is IHumanResources {
 
     address private constant WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
 
-    // TODO What are the possible values foe the fees?
-    uint24 private constant UNISWAP_FEE = 3000;
+    uint24 private constant UNISWAP_FEE = 500;
     uint256 private constant UNISWAP_DEADLINE = 30;
     uint256 private constant SLIPPAGE = 2;
 
@@ -90,7 +89,7 @@ contract HumanResources is IHumanResources {
             emit SalaryWithdrawn(employee, isEth[employee], 0);
             return;
         }
-        uint256 amountInUSDC = convertFromUSDToUSDC(amountInUSD);
+        uint256 amountInUSDC = CurrencyConvertUtils.convertFromUSDToUSDC(amountInUSD);
         uint256 oracleAmountInETH = CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED);
         lastWithdrawn[employee] = block.timestamp;
         accuredSalaryTillTermination[employee] = 0;
@@ -116,7 +115,7 @@ contract HumanResources is IHumanResources {
 
     function salaryAvailable(address employee) external view override returns (uint256) {
         uint256 amountInUSD = computeAccumulatedSalary(employee);
-        return isEth[employee] ? CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED) : convertFromUSDToUSDC(amountInUSD);
+        return isEth[employee] ? CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED) : CurrencyConvertUtils.convertFromUSDToUSDC(amountInUSD);
     }
 
     function hrManager() external view override returns (address) {
@@ -137,11 +136,6 @@ contract HumanResources is IHumanResources {
             ((block.timestamp - lastWithdrawn[employee]) * weeklySalary[employee]) / (SECONDS_IN_WEEK)
         ) + accuredSalaryTillTermination[employee];
         return amountInUSD;
-    }
-
-    function convertFromUSDToUSDC(uint256 amountInUSD) private pure returns (uint256) {
-        uint256 USD_TO_USDC = 1e12;
-        return amountInUSD / USD_TO_USDC;
     }
 
     function swapUSDCForWETH(uint256 amountInUSDC, uint256 amountOutMinimum) private returns (uint256) {
@@ -166,7 +160,6 @@ contract HumanResources is IHumanResources {
         require(success, "Failed to send ETH");
     }
 
-    // TODO Understand this
     // Allow the contract to receive ETH
     receive() external payable {}
 }

@@ -8,13 +8,15 @@ import {IHumanResources} from "../src/IHumanResources.sol";
 import {CurrencyConvertUtils} from "../src/libraries/CurrencyConvertUtils.sol";
 import {SlippageComputationUtils} from "../src/libraries/SlippageComputationUtils.sol";
 
+import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "../src/interfaces/chainlink/AggregatorV3Interface.sol";
 import "../src/interfaces/weth/IWETH.sol";
 
-// TODO CHECK FOR EVENTS
-// TODO CHECK SALARY ACCRUAL FOR LESS THAN WEEK, MORE THAN WEEK
+// TODO CHECK SALARY ACCRUAL FOR ONE SECOND, MORE THAN WEEK
+// TODO OTHER TESTS AND EDGE CASES
 contract HumanResourcesTest is Test {
     HumanResources hr;
     address hrManager;
@@ -35,12 +37,12 @@ contract HumanResourcesTest is Test {
 
     address private constant WETH_ADDRESS = 0x4200000000000000000000000000000000000006;
 
-    uint24 private constant UNISWAP_FEE = 3000;
+    uint24 private constant UNISWAP_FEE = 500;
     uint256 private constant UNISWAP_DEADLINE = 30;
     uint256 private constant SLIPPAGE = 2;
 
     function setUp() public {
-        // TODO Replace with optimism fork??
+        // TODO Replace with optimism fork?
         uint256 optimismFork = vm.createFork("https://optimism-mainnet.infura.io/v3/8a6b3b58c4ec4de19ff4e06e74a593c5");
         vm.selectFork(optimismFork);
 
@@ -57,6 +59,8 @@ contract HumanResourcesTest is Test {
 
     function testRegisterEmployee() public {
         vm.startPrank(hrManager);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.EmployeeRegistered(employee1, WEEKLY_SALARY);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
         vm.stopPrank();
 
@@ -85,6 +89,8 @@ contract HumanResourcesTest is Test {
     function testTerminateEmployee() public {
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.EmployeeTerminated(employee1);
         hr.terminateEmployee(employee1);
         vm.stopPrank();
 
@@ -119,7 +125,7 @@ contract HumanResourcesTest is Test {
         // Fast forward 1 week
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
 
-        assertEq(hr.salaryAvailable(employee1), convertFromUSDToUSDC(WEEKLY_SALARY));
+        assertEq(hr.salaryAvailable(employee1), CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
     }
 
     function testWithdrawSalary() public {
@@ -133,9 +139,11 @@ contract HumanResourcesTest is Test {
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
 
         uint256 amountInUsdc = hr.salaryAvailable(employee1);
-        assertEq(amountInUsdc, convertFromUSDToUSDC(WEEKLY_SALARY));
+        assertEq(amountInUsdc, CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
 
         vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.SalaryWithdrawn(employee1, false, amountInUsdc);
         hr.withdrawSalary();
         assertEq(hr.salaryAvailable(employee1), 0);
         assertEq(USDC.balanceOf(employee1), amountInUsdc);
@@ -150,6 +158,8 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
 
         vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.CurrencySwitched(employee1, true);
         hr.switchCurrency();
         vm.stopPrank();
 
@@ -159,6 +169,8 @@ contract HumanResourcesTest is Test {
         assertEq(amountInETH, oracleAmountInETH);
 
         vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, false);
+        emit IHumanResources.SalaryWithdrawn(employee1, true, oracleAmountInETH);
         hr.withdrawSalary();
         assertEq(hr.salaryAvailable(employee1), 0);
         assertGe(employee1.balance, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
@@ -180,6 +192,8 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
 
         vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, false);
+        emit IHumanResources.CurrencySwitched(employee1, true);
         hr.switchCurrency(); // Switch to ETH
         vm.stopPrank();
 
@@ -189,6 +203,8 @@ contract HumanResourcesTest is Test {
         assertEq(amountInETH, oracleAmountInETH);
 
         vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, false);
+        emit IHumanResources.SalaryWithdrawn(employee1, true, oracleAmountInETH);
         hr.withdrawSalary(); // Withdraw ETH
         assertEq(hr.salaryAvailable(employee1), 0);
         assertGe(employee1.balance, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
@@ -196,14 +212,18 @@ contract HumanResourcesTest is Test {
 
         // Switch back to USDC
         vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.CurrencySwitched(employee1, false);
         hr.switchCurrency();
         vm.stopPrank();
 
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
         uint256 amountInUsdc = hr.salaryAvailable(employee1);
-        assertEq(amountInUsdc, convertFromUSDToUSDC(WEEKLY_SALARY));
+        assertEq(amountInUsdc, CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
 
         vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.SalaryWithdrawn(employee1, false, amountInUsdc);
         hr.withdrawSalary(); // Withdraw USDC
         assertEq(hr.salaryAvailable(employee1), 0);
         assertEq(USDC.balanceOf(employee1), amountInUsdc);
@@ -238,6 +258,7 @@ contract HumanResourcesTest is Test {
     }
 
     function swapETHForUSDC(uint256 amountInUSDC, uint256 amountInETHMaximum, address recipient) private {
+        TransferHelper.safeApprove(WETH_ADDRESS, address(SWAP_ROUTER), amountInETHMaximum);
         ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
             tokenIn: WETH_ADDRESS,
             tokenOut: USDC_ADDRESS,
@@ -248,20 +269,14 @@ contract HumanResourcesTest is Test {
             amountOut: amountInUSDC,
             sqrtPriceLimitX96: 0
         });
-        // TODO What happens if we dont send ETH? What if we instead use WETH?
-        SWAP_ROUTER.exactOutputSingle{value: amountInETHMaximum}(params);
+        IWETH(WETH_ADDRESS).deposit{value: amountInETHMaximum}();
+        SWAP_ROUTER.exactOutputSingle(params);
     }
 
     function supplyUSDCToHR(uint256 amountInUSD) private {
         uint256 amountInETH = CurrencyConvertUtils.convertUSDToETH(amountInUSD, ETH_USD_FEED);
         uint256 slippageAmount = SlippageComputationUtils.slippageMaximum(amountInETH, SLIPPAGE);
         vm.deal(address(this), slippageAmount);
-        swapETHForUSDC(convertFromUSDToUSDC(amountInUSD), slippageAmount, address(hr));
-    }
-
-    // TODO Abstract this to a library
-    function convertFromUSDToUSDC(uint256 amountInUSD) private pure returns (uint256) {
-        uint256 USD_TO_USDC = 1e12;
-        return amountInUSD / USD_TO_USDC;
+        swapETHForUSDC(CurrencyConvertUtils.convertFromUSDToUSDC(amountInUSD), slippageAmount, address(hr));
     }
 }
