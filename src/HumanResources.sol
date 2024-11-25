@@ -54,8 +54,8 @@ contract HumanResources is IHumanResources {
         _;
     }
 
-    constructor(address _hrManagerAddress) {
-        hrManagerAddress = _hrManagerAddress;
+    constructor() {
+        hrManagerAddress = msg.sender;
     }
 
     function registerEmployee(address employee, uint256 weeklyUsdSalary) external override onlyHRManager {
@@ -76,8 +76,6 @@ contract HumanResources is IHumanResources {
         employeeActive[employee] = false;
         accuredSalaryTillTermination[employee] = computeAccumulatedSalary(employee);
         terminatedAt[employee] = block.timestamp;
-        // CHECK employedSince semantics for terminated employees in getEmployeeInfo?
-        employedSince[employee] = 0;
         activeEmployeeCount--;
         emit EmployeeTerminated(employee);
     }

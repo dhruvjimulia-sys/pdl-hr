@@ -17,6 +17,8 @@ import "../src/interfaces/weth/IWETH.sol";
 
 // TODO CHECK SALARY ACCRUAL FOR ONE SECOND, MORE THAN WEEK
 // TODO OTHER TESTS AND EDGE CASES
+// TODO WITHDRAW EMPTY SALARY
+// WAIT AFTER REGISTERING TO TEST FOR GETEMPLOYEEINFO
 // TEST FOR REREGISTRATION EDGE CASE
 contract HumanResourcesTest is Test {
     HumanResources hr;
@@ -42,20 +44,25 @@ contract HumanResourcesTest is Test {
     uint256 private constant UNISWAP_DEADLINE = 30;
     uint256 private constant SLIPPAGE = 2;
 
+    // CHECK is it necessary to set the block number -> tests also check oracle rather than using constant values?
+    uint256 private constant FORK_TESTING_BLOCK_NUMBER = 128468945;
+
     function setUp() public {
         // TODO Replace with optimism fork?
-        uint256 optimismFork = vm.createFork("https://optimism-mainnet.infura.io/v3/8a6b3b58c4ec4de19ff4e06e74a593c5");
+        uint256 optimismFork = vm.createFork("https://optimism-mainnet.infura.io/v3/8a6b3b58c4ec4de19ff4e06e74a593c5", FORK_TESTING_BLOCK_NUMBER);
         vm.selectFork(optimismFork);
 
         hrManager = makeAddr("hrManager");
         employee1 = makeAddr("employee1");
         employee2 = makeAddr("employee2");
-        hr = new HumanResources(hrManager);
+
+        vm.startPrank(hrManager);
+        hr = new HumanResources();
+        vm.stopPrank();
     }
 
-    function testConstructor() public view {
+    function testHRManager() public view {
         assertEq(hr.hrManager(), hrManager);
-        assertEq(hr.getActiveEmployeeCount(), 0);
     }
 
     function testRegisterEmployee() public {
@@ -72,10 +79,33 @@ contract HumanResourcesTest is Test {
         assertEq(terminated, 0);
     }
 
-    function testRegisterEmployeeNotHRManager() public {
+    function testUnregisteredNonTerminatedEmployeeCannotRegisterEmployees() public {
         vm.startPrank(employee1);
         vm.expectRevert(IHumanResources.NotAuthorized.selector);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+    }
+
+    function testActiveEmployeeNotHRManagerCannotRegisterEmployees() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.registerEmployee(employee2, WEEKLY_SALARY);
+        vm.stopPrank();
+    }
+
+    function testTerminatedEmployeeCannotRegisterEmployees() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
+
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.registerEmployee(employee2, WEEKLY_SALARY);
         vm.stopPrank();
     }
 
@@ -100,19 +130,53 @@ contract HumanResourcesTest is Test {
         assertEq(terminated, block.timestamp);
     }
 
-    function testTerminateEmployeeNotHRManager() public {
+    function testUnregisteredNonTerminatedEmployeeCannotTerminateEmployees() public {
         vm.startPrank(hrManager);
-        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.registerEmployee(employee2, WEEKLY_SALARY);
         vm.stopPrank();
 
         vm.startPrank(employee1);
         vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.terminateEmployee(employee2);
+        vm.stopPrank();
+    }
+
+    function testActiveEmployeeNotHRManagerCannotTerminateEmployees() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.registerEmployee(employee2, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.terminateEmployee(employee2);
+        vm.stopPrank();
+    }
+
+    function testTerminatedEmployeeCannotTerminateEmployees() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.registerEmployee(employee2, WEEKLY_SALARY);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
+
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.terminateEmployee(employee2);
+        vm.stopPrank();
+    }
+
+    function testTerminateUnregisteredNonTerminatedEmployee() public {
+        vm.startPrank(hrManager);
+        vm.expectRevert(IHumanResources.EmployeeNotRegistered.selector);
         hr.terminateEmployee(employee1);
         vm.stopPrank();
     }
 
-    function testTerminateNonExistentEmployee() public {
+    function testTerminateTerminatedEmployee() public {
         vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.terminateEmployee(employee1);
         vm.expectRevert(IHumanResources.EmployeeNotRegistered.selector);
         hr.terminateEmployee(employee1);
         vm.stopPrank();
