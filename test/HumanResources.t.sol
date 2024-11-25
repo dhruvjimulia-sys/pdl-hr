@@ -15,7 +15,6 @@ import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "../src/interfaces/chainlink/AggregatorV3Interface.sol";
 import "../src/interfaces/weth/IWETH.sol";
 
-// TODO WITHDRAW EMPTY SALARY
 // WAIT AFTER REGISTERING TO TEST FOR GETEMPLOYEEINFO
 // TODO when an employee is re-registered, there is a chance of the employee still having an unclaimed salary. In this case, you should account for the unclaimed salary.
 contract HumanResourcesTest is Test {
@@ -264,7 +263,7 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
 
         vm.startPrank(employee1);
-        vm.expectEmit(true, true, true, false);
+        vm.expectEmit(true, true, true, true);
         emit IHumanResources.CurrencySwitched(employee1, true);
         hr.switchCurrency();
         vm.stopPrank();
@@ -283,9 +282,9 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
 
         vm.startPrank(employee1);
-        vm.expectEmit(true, true, true, false);
+        vm.expectEmit(true, true, true, true);
         emit IHumanResources.CurrencySwitched(employee1, true);
-        hr.switchCurrency(); // Switch to ETH
+        hr.switchCurrency();
         vm.stopPrank();
 
         vm.warp(block.timestamp + SECONDS_IN_WEEK);
@@ -296,12 +295,11 @@ contract HumanResourcesTest is Test {
         vm.startPrank(employee1);
         vm.expectEmit(true, true, true, false);
         emit IHumanResources.SalaryWithdrawn(employee1, true, oracleAmountInETH);
-        hr.withdrawSalary(); // Withdraw ETH
+        hr.withdrawSalary();
         assertEq(hr.salaryAvailable(employee1), 0);
         assertGe(employee1.balance, SlippageComputationUtils.slippageMinimum(oracleAmountInETH, SLIPPAGE));
         vm.stopPrank();
 
-        // Switch back to USDC
         vm.startPrank(employee1);
         vm.expectEmit(true, true, true, true);
         emit IHumanResources.CurrencySwitched(employee1, false);
@@ -315,10 +313,68 @@ contract HumanResourcesTest is Test {
         vm.startPrank(employee1);
         vm.expectEmit(true, true, true, true);
         emit IHumanResources.SalaryWithdrawn(employee1, false, amountInUsdc);
-        hr.withdrawSalary(); // Withdraw USDC
+        hr.withdrawSalary();
         assertEq(hr.salaryAvailable(employee1), 0);
         assertEq(USDC.balanceOf(employee1), amountInUsdc);
         vm.stopPrank();
+    }
+
+    function testSwitchCurrencyAutomaticallyWithdrawsSalary() public {
+        supplyUSDCToHR(WEEKLY_SALARY);
+
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        uint256 amountInUsdc = hr.salaryAvailable(employee1);
+        assertEq(amountInUsdc, CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+
+        vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.SalaryWithdrawn(employee1, false, amountInUsdc);
+        hr.switchCurrency();
+        assertEq(hr.salaryAvailable(employee1), 0);
+        assertEq(USDC.balanceOf(employee1), amountInUsdc);
+        vm.stopPrank();
+    }
+
+    function testSwitchCurrencyUnregisteredEmployee() public {
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.switchCurrency();
+        vm.stopPrank();
+    }
+
+    function testSwitchCurrencyTerminatedEmployee() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
+
+        vm.startPrank(employee1);
+        vm.expectRevert(IHumanResources.NotAuthorized.selector);
+        hr.switchCurrency();
+        vm.stopPrank();
+    }
+
+    function testSwitchCurrencyReregisteredEmployee() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        hr.terminateEmployee(employee1);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.CurrencySwitched(employee1, true);
+        hr.switchCurrency();
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+        uint256 amountInETH = hr.salaryAvailable(employee1);
+        uint256 oracleAmountInETH = CurrencyConvertUtils.convertUSDToETH(WEEKLY_SALARY, ETH_USD_FEED);
+        assertEq(amountInETH, oracleAmountInETH);
     }
 
     function testWithdrawEmptySalary() public {
@@ -378,26 +434,73 @@ contract HumanResourcesTest is Test {
         vm.stopPrank();
     }
 
-    // function testSwitchCurrencyNotEmployee() public {
-    //     vm.startPrank(employee1);
-    //     vm.expectRevert(IHumanResources.NotAuthorized.selector);
-    //     hr.switchCurrency();
-    //     vm.stopPrank();
-    // }
-
-    function testSwitchCurrencyTerminatedEmployee() public {
-        vm.startPrank(hrManager);
-        hr.registerEmployee(employee1, WEEKLY_SALARY);
-        hr.terminateEmployee(employee1);
-        vm.stopPrank();
-
+    function testUnregisteredEmployeeCannotWithdrawSalary() public {
         vm.startPrank(employee1);
         vm.expectRevert(IHumanResources.NotAuthorized.selector);
-        hr.switchCurrency();
+        hr.withdrawSalary();
         vm.stopPrank();
     }
 
-    // TODO test in preferred currency
+    function testWithdrawSalaryTerminatedEmployee() public {
+        supplyUSDCToHR(WEEKLY_SALARY);
+        
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        vm.startPrank(hrManager);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        uint256 amountInUsdc = hr.salaryAvailable(employee1);
+        assertEq(amountInUsdc, CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY));
+
+        vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.SalaryWithdrawn(employee1, false, amountInUsdc);
+        hr.withdrawSalary();
+        assertEq(hr.salaryAvailable(employee1), 0);
+        assertEq(USDC.balanceOf(employee1), amountInUsdc);
+        vm.stopPrank();
+    }
+
+    function testWithdrawSalaryReregisteredEmployee() public {
+        supplyUSDCToHR(WEEKLY_SALARY * 2);
+
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        vm.startPrank(hrManager);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        uint256 amountInUsdc = hr.salaryAvailable(employee1);
+        assertEq(amountInUsdc, CurrencyConvertUtils.convertFromUSDToUSDC(WEEKLY_SALARY * 2));
+
+        vm.startPrank(employee1);
+        vm.expectEmit(true, true, true, true);
+        emit IHumanResources.SalaryWithdrawn(employee1, false, amountInUsdc);
+        hr.withdrawSalary();
+        assertEq(hr.salaryAvailable(employee1), 0);
+        assertEq(USDC.balanceOf(employee1), amountInUsdc);
+        vm.stopPrank();
+    }
+
     function testSalaryAvailableAndThatDefaultSalaryIsUSDC() public {
         vm.startPrank(hrManager);
         hr.registerEmployee(employee1, WEEKLY_SALARY);
