@@ -15,10 +15,8 @@ import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "../src/interfaces/chainlink/AggregatorV3Interface.sol";
 import "../src/interfaces/weth/IWETH.sol";
 
-// WAIT AFTER REGISTERING TO TEST FOR GETEMPLOYEEINFO
-// TODO when an employee is re-registered, there is a chance of the employee still having an unclaimed salary. In this case, you should account for the unclaimed salary.
 contract HumanResourcesTest is Test {
-    HumanResources hr;
+    IHumanResources hr;
     address hrManager;
     address employee1;
     address employee2;
@@ -45,7 +43,7 @@ contract HumanResourcesTest is Test {
     uint256 private constant SLIPPAGE = 2;
     
     function setUp() public {
-        // TODO Replace with environment variable
+        // CHECK make RPC url public?
         uint256 optimismFork = vm.createFork("https://opt-mainnet.g.alchemy.com/v2/JXw5flTicFXgynoKleHsCuPB4A5TcXuM");
         vm.selectFork(optimismFork);
 
@@ -531,6 +529,74 @@ contract HumanResourcesTest is Test {
         hr.terminateEmployee(employee2);
         assertEq(hr.getActiveEmployeeCount(), 0);
         vm.stopPrank();
+    }
+
+    function testGetEmployeeInfoUnregisteredEmployee() view public {
+        (uint256 salary, uint256 employedSince, uint256 terminatedAt) = hr.getEmployeeInfo(employee1);
+        assertEq(salary, 0);
+        assertEq(employedSince, 0);
+        assertEq(terminatedAt, 0);
+    }
+
+    function testGetEmployeeInfoRegisteredEmployee() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        uint256 registrationTimestamp = block.timestamp;
+        vm.warp(registrationTimestamp + SECONDS_IN_WEEK);
+
+        (uint256 salary, uint256 employedSince, uint256 terminatedAt) = hr.getEmployeeInfo(employee1);
+        assertEq(salary, WEEKLY_SALARY);
+        assertEq(employedSince, registrationTimestamp);
+        assertEq(terminatedAt, 0);
+    }
+
+    function testGetEmployeeInfoTerminatedEmployee() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        uint256 registrationTimestamp = block.timestamp;
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        vm.startPrank(hrManager);
+        hr.terminateEmployee(employee1);
+        uint256 terminationTimestamp = block.timestamp;
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        (uint256 salary, uint256 employedSince, uint256 terminatedAt) = hr.getEmployeeInfo(employee1);
+        assertEq(salary, WEEKLY_SALARY);
+        assertEq(employedSince, registrationTimestamp);
+        assertEq(terminatedAt, terminationTimestamp);
+    }
+
+    function testGetEmployeeInfoReregisteredEmployee() public {
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        vm.startPrank(hrManager);
+        hr.terminateEmployee(employee1);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        vm.startPrank(hrManager);
+        hr.registerEmployee(employee1, WEEKLY_SALARY * 2);
+        uint256 registrationTimestamp = block.timestamp;
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + SECONDS_IN_WEEK);
+
+        (uint256 salary, uint256 employedSince, uint256 terminatedAt) = hr.getEmployeeInfo(employee1);
+        assertEq(salary, WEEKLY_SALARY * 2);
+        assertEq(employedSince, registrationTimestamp);
+        assertEq(terminatedAt, 0);
     }
 
     function swapETHForUSDC(uint256 amountInUSDC, uint256 amountInETHMaximum, address recipient) private {
