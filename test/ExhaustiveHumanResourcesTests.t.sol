@@ -15,7 +15,7 @@ import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "../src/interfaces/chainlink/AggregatorV3Interface.sol";
 import "../src/interfaces/weth/IWETH.sol";
 
-contract HumanResourcesTest is Test {
+contract ExhaustiveHumanResourcesTest is Test {
     IHumanResources hr;
     address hrManager;
     address employee1;
@@ -44,6 +44,7 @@ contract HumanResourcesTest is Test {
     
     function setUp() public {
         // CHECK make RPC url public?
+        // CHECK deployment: etherscan?
         uint256 optimismFork = vm.createFork("https://opt-mainnet.g.alchemy.com/v2/JXw5flTicFXgynoKleHsCuPB4A5TcXuM");
         vm.selectFork(optimismFork);
 

@@ -1,0 +1,2 @@
+export HR_CONTRACT=0x67aD6EA566BA6B0fC52e97Bc25CE46120fdAc04c
+export ETH_RPC_URL=http://localhost:8545
