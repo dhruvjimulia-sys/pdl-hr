@@ -613,8 +613,6 @@ contract HumanResourcesTest is Test {
         });
         IWETH(WETH_ADDRESS).deposit{value: amountInETHMaximum}();
         SWAP_ROUTER.exactOutputSingle(params);
-
-        // TODO exactOutputSingle thing to do
     }
 
     function supplyUSDCToHR(uint256 amountInUSD) private {
