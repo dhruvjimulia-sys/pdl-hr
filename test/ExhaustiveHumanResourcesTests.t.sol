@@ -43,9 +43,7 @@ contract ExhaustiveHumanResourcesTest is Test {
     uint256 private constant SLIPPAGE = 2;
     
     function setUp() public {
-        // CHECK make RPC url public?
-        // CHECK deployment: etherscan?
-        uint256 optimismFork = vm.createFork("https://opt-mainnet.g.alchemy.com/v2/JXw5flTicFXgynoKleHsCuPB4A5TcXuM");
+        uint256 optimismFork = vm.createFork("https://mainnet.optimism.io");
         vm.selectFork(optimismFork);
 
         hrManager = makeAddr("hrManager");
